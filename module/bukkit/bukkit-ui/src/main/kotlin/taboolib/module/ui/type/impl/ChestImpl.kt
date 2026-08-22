@@ -13,7 +13,6 @@ import taboolib.module.ui.ClickType
 import taboolib.module.ui.MenuHolder
 import taboolib.module.ui.openMenu
 import taboolib.module.ui.type.Chest
-import taboolib.module.ui.virtual.virtualize
 import taboolib.platform.util.ItemBuilder
 import taboolib.platform.util.buildItem
 import java.util.concurrent.ConcurrentHashMap
@@ -26,12 +25,6 @@ open class ChestImpl(override var title: String) : Chest {
 
     /** 行数 **/
     override var rows = 1
-
-    /** 虚拟化 */
-    override var virtualized = false
-
-    /** 虚拟化时玩家背包内容 */
-    override var virtualizedStorageContents: List<ItemStack>? = null
 
     /** 物品与对应抽象字符关系 **/
     override var items = ConcurrentHashMap<Char, ItemStack>()
@@ -222,18 +215,10 @@ open class ChestImpl(override var title: String) : Chest {
     // region 布局函数
 
     /**
-     * 使用虚拟页面（将自动阻止所有点击行为）
-     */
-    override fun virtualize(storageContents: List<ItemStack>? ) {
-        this.virtualized = true
-        this.virtualizedStorageContents = storageContents
-    }
-
-    /**
      * 隐藏玩家背包（自动启动虚拟页面）
      */
     override fun hidePlayerInventory() {
-        virtualize((0 until 36).map { ItemStack(Material.AIR) })
+        TODO("Not supported yet.")
     }
 
     /**
@@ -402,10 +387,6 @@ open class ChestImpl(override var title: String) : Chest {
     override fun build(): Inventory {
         lastInventory = Bukkit.createInventory(holderCallback(this), if (rows > 0) rows * 9 else slots.size * 9, createTitle())
         inventoryCreateCallback?.invoke(lastInventory)
-        // 虚拟化
-        if (virtualized) {
-            lastInventory = lastInventory.virtualize(virtualizedStorageContents)
-        }
         var row = 0
         while (row < slots.size) {
             val line = slots[row]

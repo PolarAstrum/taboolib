@@ -37,12 +37,6 @@ open class StorableChestImpl(title: String) : ChestImpl(title), StorableChest {
     protected val dragHandler = DragActionHandler()
 
     override fun rule(rule: StorableChest.Rule.() -> Unit) {
-        if (virtualized) error(
-            """
-                无法在虚拟页面中更改规则。
-                Cannot change rule when virtualized
-            """.t()
-        )
         rule(this.rule)
     }
 

@@ -20,12 +20,6 @@ interface Chest : Menu {
     /** 获取行数 */
     val rows: Int
 
-    /** 是否正在使用虚拟化 */
-    val virtualized: Boolean
-
-    /** 虚拟化时玩家背包内容 */
-    val virtualizedStorageContents: List<ItemStack>?
-
     /** 物品与对应抽象字符关系 **/
     val items: ConcurrentHashMap<Char, ItemStack>
 
@@ -37,11 +31,6 @@ interface Chest : Menu {
 
     /** 是否打开过 **/
     val isOpened: Boolean
-
-    /**
-     * 启用虚拟化页面（将自动阻止所有点击行为）
-     */
-    fun virtualize(storageContents: List<ItemStack>? = null)
 
     /**
      * 隐藏玩家背包（自动启动虚拟页面）

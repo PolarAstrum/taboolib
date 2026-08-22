@@ -8,7 +8,6 @@ import org.bukkit.inventory.Inventory
 import org.bukkit.inventory.ItemStack
 import taboolib.module.ui.type.Anvil
 import taboolib.module.ui.type.AnvilCallback
-import taboolib.module.ui.virtual.virtualize
 
 /**
  * FlexUI
@@ -32,9 +31,6 @@ open class AnvilImpl(title: String) : ChestImpl(title), Anvil, AnvilCallback {
 
     override fun build(): Inventory {
         var inventory = Bukkit.createInventory(holderCallback(this), InventoryType.ANVIL, title)
-        if (virtualized) {
-            inventory = inventory.virtualize()
-        }
         if (slots.isNotEmpty()) {
             val line = slots[0]
             var cel = 0

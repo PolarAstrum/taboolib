@@ -10,8 +10,6 @@ import org.bukkit.inventory.InventoryView
 import org.bukkit.inventory.ItemStack
 import taboolib.common.util.t
 import taboolib.module.ui.type.Chest
-import taboolib.module.ui.virtual.RemoteInventory
-import taboolib.module.ui.virtual.VirtualInventoryInteractEvent
 
 /**
  * @author 坏黑
@@ -58,7 +56,6 @@ class ClickEvent(private val bukkitEvent: InventoryInteractEvent, val clickType:
     val rawSlot: Int
         get() = when (clickType) {
             ClickType.CLICK -> clickEvent().rawSlot
-            ClickType.VIRTUAL -> virtualEvent().clickSlot
             ClickType.DRAG -> {
                 val rawSlots = dragEvent().rawSlots
                 if (rawSlots.size == 1) rawSlots.first() else -1
@@ -69,7 +66,6 @@ class ClickEvent(private val bukkitEvent: InventoryInteractEvent, val clickType:
     val hotbarKey: Int
         get() = when (clickType) {
             ClickType.CLICK -> clickEvent().hotbarButton
-            ClickType.VIRTUAL -> virtualEvent().hotbarKey
             else -> -1
         }
 
@@ -77,16 +73,12 @@ class ClickEvent(private val bukkitEvent: InventoryInteractEvent, val clickType:
     var currentItem: ItemStack?
         get() = when (clickType) {
             ClickType.CLICK -> clickEvent().currentItem
-            ClickType.VIRTUAL -> virtualEvent().clickItem
             else -> null
         }
         set(item) {
             when (clickType) {
                 ClickType.CLICK -> {
                     clickEvent().currentItem = item
-                }
-                ClickType.VIRTUAL -> {
-                    inventory.setItem(virtualEvent().clickSlot, item)
                 }
                 else -> {}
             }
@@ -158,24 +150,6 @@ class ClickEvent(private val bukkitEvent: InventoryInteractEvent, val clickType:
         return bukkitEvent as? InventoryDragEvent
     }
 
-    /** 转换为虚拟点击事件 */
-    fun virtualEvent(): RemoteInventory.ClickEvent {
-        if (clickType != ClickType.VIRTUAL) {
-            error(
-                """
-                    virtualEvent() 无法在 "$clickType" 动作中使用。
-                    virtualEvent() is not available in "$clickType" action.
-                """.t()
-            )
-        }
-        return (bukkitEvent as VirtualInventoryInteractEvent).clickEvent
-    }
-
-    /** 安全转换为虚拟点击事件 */
-    fun virtualEventOrNull(): RemoteInventory.ClickEvent? {
-        return (bukkitEvent as? VirtualInventoryInteractEvent)?.clickEvent
-    }
-
     /** 用安全的方式处理点击事件 */
     fun onClick(consumer: InventoryClickEvent.() -> Unit): ClickEvent {
         if (clickType == ClickType.CLICK) {
@@ -188,14 +162,6 @@ class ClickEvent(private val bukkitEvent: InventoryInteractEvent, val clickType:
     fun onDrag(consumer: InventoryDragEvent.() -> Unit): ClickEvent {
         if (clickType == ClickType.DRAG) {
             consumer(dragEvent())
-        }
-        return this
-    }
-
-    /** 用安全的方式处理虚拟点击事件 */
-    fun onVirtualClick(consumer: RemoteInventory.ClickEvent.() -> Unit): ClickEvent {
-        if (clickType == ClickType.VIRTUAL) {
-            consumer(virtualEvent())
         }
         return this
     }

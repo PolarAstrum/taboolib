@@ -31,7 +31,7 @@ internal object ClickListener {
     @Awake(LifeCycle.DISABLE)
     fun onDisable() {
         Bukkit.getOnlinePlayers().forEach {
-            if (MenuHolder.fromInventory(InventoryViewProxy.getTopInventory(it.openInventory)) != null) {
+            if (MenuHolder.fromInventory(it.openInventory.topInventory) != null) {
                 it.closeInventory()
             }
         }
@@ -101,8 +101,8 @@ internal object ClickListener {
             if (event.isCancelled) {
                 event.itemDrop.remove()
             } else {
-                InventoryViewProxy.getCursor(e.view)?.type = Material.AIR
-                InventoryViewProxy.setCursor(e.view, null)
+                e.view.cursor?.type = Material.AIR
+                e.view.cursor = null
             }
         }
     }
@@ -131,7 +131,7 @@ internal object ClickListener {
 
     @SubscribeEvent
     fun onDropItem(e: PlayerDropItemEvent) {
-        val builder = MenuHolder.fromInventory(InventoryViewProxy.getTopInventory(e.player.openInventory)) ?: return
+        val builder = MenuHolder.fromInventory(e.player.openInventory.topInventory) ?: return
         if (builder.handLocked && !e.itemDrop.hasMetadata("internal-drop")) {
             e.isCancelled = true
         }
@@ -139,7 +139,7 @@ internal object ClickListener {
 
     @SubscribeEvent
     fun onItemHeld(e: PlayerItemHeldEvent) {
-        val builder = MenuHolder.fromInventory(InventoryViewProxy.getTopInventory(e.player.openInventory)) ?: return
+        val builder = MenuHolder.fromInventory(e.player.openInventory.topInventory) ?: return
         if (builder.handLocked) {
             e.isCancelled = true
         }
@@ -148,7 +148,7 @@ internal object ClickListener {
     @Ghost
     @SubscribeEvent
     fun onSwap(e: PlayerSwapHandItemsEvent) {
-        val builder = MenuHolder.fromInventory(InventoryViewProxy.getTopInventory(e.player.openInventory)) ?: return
+        val builder = MenuHolder.fromInventory(e.player.openInventory.topInventory) ?: return
         if (builder.handLocked) {
             e.isCancelled = true
         }

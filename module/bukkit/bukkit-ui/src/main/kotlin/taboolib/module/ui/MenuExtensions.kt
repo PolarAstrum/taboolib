@@ -200,7 +200,6 @@ fun ClickEvent.conditionSlot(rawSlot: Int, condition: (put: ItemStack?, out: Ite
                 }
             }
         }
-        VIRTUAL -> {}
     }
     return true
 }
@@ -300,7 +299,6 @@ fun ClickEvent.amountCondition(rawSlot: Int, amount: Int, failedCallback: () -> 
                 }
             }
         }
-        VIRTUAL -> {}
     }
     return true
 }
@@ -652,6 +650,5 @@ fun ClickEvent.lockSlots(rawSlots: List<Int>, reverse: Boolean = false) {
                 event.isCancelled = true
             }
         }
-        VIRTUAL -> {}
     }
 }

@@ -5,10 +5,7 @@ import org.bukkit.Material
 import org.bukkit.block.Block
 import org.bukkit.entity.Damageable
 import org.bukkit.entity.Entity
-import org.bukkit.entity.LivingEntity
 import org.bukkit.entity.Player
-import org.bukkit.inventory.ItemStack
-import taboolib.type.BukkitEquipment
 
 /**
  * 使生物死亡
@@ -28,20 +25,6 @@ val Entity.groundBlock: Block
  */
 val Entity.groundBlockType: Material
     get() = groundBlock.type
-
-/**
- * 获取装备
- */
-fun LivingEntity.getEquipment(slot: BukkitEquipment): ItemStack? {
-    return slot.getItem(this)
-}
-
-/**
- * 修改装备
- */
-fun LivingEntity.setEquipment(slot: BukkitEquipment, item: ItemStack) {
-    slot.setItem(this, item)
-}
 
 /**
  * 转换为安全实体类

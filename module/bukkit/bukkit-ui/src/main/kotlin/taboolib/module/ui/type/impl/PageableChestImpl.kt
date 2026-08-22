@@ -7,9 +7,6 @@ import org.bukkit.inventory.ItemStack
 import taboolib.common.util.subList
 import taboolib.module.ui.ClickEvent
 import taboolib.module.ui.type.PageableChest
-import taboolib.module.ui.virtual.VirtualInventory
-import taboolib.module.ui.virtual.inject
-import taboolib.module.ui.virtual.openVirtualInventory
 import taboolib.platform.util.isNotAir
 import java.util.concurrent.CopyOnWriteArrayList
 
@@ -124,11 +121,7 @@ open class PageableChestImpl<T>(title: String) : ChestImpl(title), PageableChest
     ) {
         // 刷新页面
         fun refresh() {
-            if (virtualized) {
-                viewer.openVirtualInventory(build() as VirtualInventory).inject(this)
-            } else {
-                viewer.openInventory(build())
-            }
+            viewer.openInventory(build())
             pageChangeCallback(viewer)
         }
         // 设置物品
@@ -160,11 +153,7 @@ open class PageableChestImpl<T>(title: String) : ChestImpl(title), PageableChest
     ) {
         // 刷新页面
         fun refresh() {
-            if (virtualized) {
-                viewer.openVirtualInventory(build() as VirtualInventory).inject(this)
-            } else {
-                viewer.openInventory(build())
-            }
+            viewer.openInventory(build())
             pageChangeCallback(viewer)
         }
         // 设置物品

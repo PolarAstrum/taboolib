@@ -199,8 +199,7 @@ abstract class NMSItemTag {
         val instance by unsafeLazy {
             when {
                 MinecraftVersion.isUnobfuscated -> nmsProxy<NMSItemTag>("{name}Impl2")
-                versionId >= 12005 -> nmsProxy<NMSItemTag>("{name}Impl")
-                else -> nmsProxy<NMSItemTag>("{name}Legacy")
+                else -> nmsProxy<NMSItemTag>("{name}Impl")
             }
         }
 
