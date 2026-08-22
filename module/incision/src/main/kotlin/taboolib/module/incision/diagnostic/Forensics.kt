@@ -1,9 +1,7 @@
 package taboolib.module.incision.diagnostic
 
 import taboolib.common.PrimitiveSettings
-import taboolib.common.platform.function.debug as platformDebug
-import taboolib.common.platform.function.info as platformInfo
-import taboolib.common.platform.function.warning as platformWarning
+import taboolib.common.platform.function.warning
 
 /**
  * 结构化诊断日志器。
@@ -20,32 +18,20 @@ object Forensics {
         get() = PrimitiveSettings.IS_DEBUG_MODE
 
     fun info(message: String) {
-        if (DEBUG) emitSafely("[Incision] $message", false) { platformInfo(it) }
+        if (DEBUG) taboolib.common.platform.function.info("[Incision] $message")
     }
 
     fun debug(message: String) {
-        if (DEBUG) emitSafely("[Incision][DEBUG] $message", false) { platformDebug(it) }
+        if (DEBUG) taboolib.common.platform.function.debug("[Incision][DEBUG] $message")
     }
 
     fun warn(message: String) {
-        if (DEBUG) emitSafely("[Incision][WARN] $message", true) { platformWarning(it) }
+        if (DEBUG) warning("[Incision][WARN] $message")
     }
 
     fun error(message: String, cause: Throwable? = null) {
         System.err.println("[Incision][ERROR] $message")
         cause?.printStackTrace(System.err)
-    }
-
-    /**
-     * CONST 阶段可能早于 BukkitPlugin 实例完成构造，平台日志实现此时会访问尚未就绪的插件实例。
-     * 诊断路径绝不能反向中断 Incision 初始化，因此平台输出失败时只退回 JDK 标准流。
-     */
-    private fun emitSafely(message: String, stderr: Boolean, platformLog: (String) -> Unit) {
-        try {
-            platformLog(message)
-        } catch (_: Throwable) {
-            if (stderr) System.err.println(message) else System.out.println(message)
-        }
     }
 
     /**

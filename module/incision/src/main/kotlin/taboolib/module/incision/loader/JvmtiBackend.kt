@@ -1,10 +1,8 @@
 package taboolib.module.incision.loader
 
 import taboolib.module.incision.diagnostic.Forensics
-import taboolib.module.incision.runtime.CanonicalBridge
 import java.io.File
 import java.util.concurrent.ConcurrentHashMap
-import java.util.concurrent.CopyOnWriteArrayList
 
 /**
  * JVMTI native backend — retransforms already-loaded classes without
@@ -21,59 +19,39 @@ import java.util.concurrent.CopyOnWriteArrayList
  */
 object JvmtiBackend : Backend {
 
-    private val transformers = ConcurrentHashMap<String, CopyOnWriteArrayList<(ByteArray) -> ByteArray?>>()
+    private val transformers = ConcurrentHashMap<String, MutableList<(ByteArray) -> ByteArray?>>()
 
     /** 防重入保护：weave 过程中触发的类加载不应再次进入 transformer */
     private val reentrantGuard = ThreadLocal.withInitial { false }
 
     @Volatile private var loaded = false
     @Volatile private var available = false
-    @Volatile private var localNativeOwner = false
-    @Volatile private var sharedBound = false
 
     override val name: String = "JVMTI"
 
     override fun available(): Boolean {
-        if (sharedBound) return available
         if (!loaded) tryLoad()
         return available
     }
 
-    /** Bridge 注入完成后加入 JVM 级 native lease；后加载插件不得再次调用 System.load。 */
-    fun bindCanonicalBridge() {
-        sharedBound = true
-        available = CanonicalBridge.registerNativeBackend(JvmtiBackend::class.java, localNativeOwner)
-        loaded = true
-        if (available && !localNativeOwner) {
-            Forensics.info("JvmtiBackend: 复用 JVM canonical native owner")
-        }
-    }
-
     override fun addTransformer(className: String, transformer: (ByteArray) -> ByteArray?): Backend.BackendToken {
         val key = className.replace('.', '/')
-        transformers.computeIfAbsent(key) { CopyOnWriteArrayList() }.add(transformer)
+        transformers.computeIfAbsent(key) { mutableListOf() }.add(transformer)
         return object : Backend.BackendToken {
-            override fun remove() {
-                transformers[key]?.remove(transformer)
-                if (transformers[key].isNullOrEmpty()) {
-                    transformers.remove(key)
-                }
-            }
+            override fun remove() { transformers[key]?.remove(transformer) }
         }
     }
 
     override fun retransform(className: String): Boolean {
         if (!available()) return false
-        val internalName = className.replace('.', '/')
-        val loadedCount = runCatching { nativeLoadedClassCount(internalName) }.getOrDefault(0)
-        if (loadedCount <= 0) {
+        val cls = findLoadedClass(className)
+        if (cls == null) {
             Forensics.debug("JvmtiBackend.retransform: $className not loaded yet, will transform on load")
-            return false
+            return true
         }
         return try {
-            val transformed = nativeRetransformByName(internalName)
-            val ok = transformed == loadedCount
-            Forensics.debug("JvmtiBackend.retransform $className → $ok (loaded=$loadedCount transformed=$transformed)")
+            val ok = nRetransform(cls)
+            Forensics.debug("JvmtiBackend.retransform $className → $ok (loader=${cls.classLoader})")
             ok
         } catch (t: Throwable) {
             Forensics.warn("JvmtiBackend.retransform failed: $className — ${t.message}")
@@ -84,13 +62,6 @@ object JvmtiBackend : Backend {
     /** Called from native ClassFileLoadHook for every (re)loaded class. */
     @JvmStatic
     fun onClassFileLoad(loader: ClassLoader?, name: String, bytes: ByteArray): ByteArray? {
-        if (sharedBound) return CanonicalBridge.transformNative(loader, name, bytes)
-        return onSharedClassFileLoad(loader, name, bytes)
-    }
-
-    /** 由 bootstrap Bridge 广播到当前插件的本地 transformer 链。 */
-    @JvmStatic
-    fun onSharedClassFileLoad(loader: ClassLoader?, name: String, bytes: ByteArray): ByteArray? {
         // 防重入：如果当前线程正在 weave 中（触发了新类加载），跳过 transformer 避免无限递归
         if (reentrantGuard.get()) return null
         val list = transformers[name]
@@ -122,8 +93,6 @@ object JvmtiBackend : Backend {
 
     @JvmStatic private external fun nInit(backendClass: Class<*>): Boolean
     @JvmStatic private external fun nRetransform(target: Class<*>): Boolean
-    @JvmStatic private external fun nRetransformByName(internalName: String): Int
-    @JvmStatic private external fun nLoadedClassCount(internalName: String): Int
     @JvmStatic private external fun nAvailable(): Boolean
     @JvmStatic external fun nDispose()
     @JvmStatic external fun nDefineClass(loader: ClassLoader?, name: String, bytes: ByteArray): Class<*>?
@@ -140,43 +109,10 @@ object JvmtiBackend : Backend {
     @JvmStatic external fun nStaticFieldSet(ownerClass: Class<*>, fieldName: String, fieldDesc: String, value: Any?)
     @JvmStatic external fun nInvokeMethod(obj: Any?, ownerClass: Class<*>, methodName: String, methodDesc: String, args: Array<Any?>?): Any?
 
-    private fun nativeLoadedClassCount(internalName: String): Int =
-        (nativeInvoke("loadedClassCount", internalName) as? Number)?.toInt() ?: 0
-
-    private fun nativeRetransformByName(internalName: String): Int =
-        (nativeInvoke("retransformByName", internalName) as? Number)?.toInt() ?: -1
-
-    @Suppress("UNCHECKED_CAST")
-    private fun nativeInvoke(operation: String, vararg args: Any?): Any? =
-        if (sharedBound) CanonicalBridge.invokeNative(operation, *args)
-        else sharedNativeInvoke(operation, args.copyOf() as Array<Any?>)
-
-    /**
-     * canonical Bridge 通过这个固定反射入口调用唯一 native owner。
-     * switch 明确限制可调用协议，避免把任意反射能力暴露给其他插件 ClassLoader。
-     */
-    @JvmStatic
-    fun sharedNativeInvoke(operation: String, args: Array<Any?>): Any? = when (operation) {
-        "loadedClassCount" -> nLoadedClassCount(args[0] as String)
-        "retransformByName" -> nRetransformByName(args[0] as String)
-        "defineClass" -> nDefineClass(args[0] as ClassLoader?, args[1] as String, args[2] as ByteArray)
-        "cacheOriginal" -> nCacheOriginal(args[0] as String, args[1] as ByteArray)
-        "getCachedOriginal" -> nGetCachedOriginal(args[0] as String)
-        "extractClassBytes" -> nExtractClassBytes(args[0] as Class<*>)
-        "purgeCache" -> nPurgeCache(args[0] as String)
-        "fieldGet" -> nFieldGet(args[0]!!, args[1] as Class<*>, args[2] as String, args[3] as String)
-        "fieldSet" -> nFieldSet(args[0]!!, args[1] as Class<*>, args[2] as String, args[3] as String, args[4])
-        "staticFieldGet" -> nStaticFieldGet(args[0] as Class<*>, args[1] as String, args[2] as String)
-        "staticFieldSet" -> nStaticFieldSet(args[0] as Class<*>, args[1] as String, args[2] as String, args[3])
-        "invokeMethod" -> nInvokeMethod(args[0], args[1] as Class<*>, args[2] as String, args[3] as String, args[4] as Array<Any?>?)
-        "dispose" -> nDispose()
-        else -> throw IllegalArgumentException("Unsupported shared native operation: $operation")
-    }
-
     fun defineClassInClassLoader(loader: ClassLoader?, name: String, bytes: ByteArray): Class<*>? {
         if (!available()) return null
         return try {
-            val cls = nativeInvoke("defineClass", loader, name.replace('.', '/'), bytes) as? Class<*>
+            val cls = nDefineClass(loader, name.replace('.', '/'), bytes)
             if (cls != null) Forensics.debug("JvmtiBackend.defineClass: $name in ${loader ?: "bootstrap"}")
             cls
         } catch (t: Throwable) {
@@ -185,32 +121,10 @@ object JvmtiBackend : Backend {
         }
     }
 
-    override fun isClassLoaded(className: String): Boolean {
-        if (!available()) return false
-        val internalName = className.replace('.', '/')
-        val count = runCatching { nativeLoadedClassCount(internalName) }.getOrDefault(0)
-        Forensics.debug("JvmtiBackend.isClassLoaded: $internalName count=$count")
-        return count > 0
-    }
-
-    /** 当前插件 lease 释放时停止 native 回调并清空所有插件类引用，避免 reload 持有已关闭 loader。 */
-    @Synchronized
-    fun dispose() {
-        transformers.clear()
-        if (!available) return
-        if (sharedBound) {
-            CanonicalBridge.unregisterNativeBackend(JvmtiBackend::class.java)
-        } else {
-            runCatching { nDispose() }.onFailure { Forensics.warn("JvmtiBackend.dispose 失败: ${it.message}") }
-        }
-        available = false
-        sharedBound = false
-    }
-
     fun cacheOriginal(owner: String, bytes: ByteArray): Boolean {
         if (!available()) return false
         return try {
-            nativeInvoke("cacheOriginal", cacheKey(owner), bytes) as? Boolean ?: false
+            nCacheOriginal(owner, bytes)
         } catch (t: Throwable) {
             Forensics.warn("nCacheOriginal 失败: ${t.message}")
             false
@@ -220,7 +134,7 @@ object JvmtiBackend : Backend {
     fun getCachedOriginal(owner: String): ByteArray? {
         if (!available()) return null
         return try {
-            nativeInvoke("getCachedOriginal", cacheKey(owner)) as? ByteArray
+            nGetCachedOriginal(owner)
         } catch (t: Throwable) {
             Forensics.warn("nGetCachedOriginal 失败: ${t.message}")
             null
@@ -230,7 +144,7 @@ object JvmtiBackend : Backend {
     fun extractClassBytes(target: Class<*>): ByteArray? {
         if (!available()) return null
         return try {
-            nativeInvoke("extractClassBytes", target) as? ByteArray
+            nExtractClassBytes(target)
         } catch (t: Throwable) {
             Forensics.warn("nExtractClassBytes 失败: ${t.message}")
             null
@@ -240,16 +154,10 @@ object JvmtiBackend : Backend {
     fun purgeCache(owner: String) {
         if (!available()) return
         try {
-            nativeInvoke("purgeCache", cacheKey(owner))
+            nPurgeCache(owner)
         } catch (t: Throwable) {
             Forensics.warn("nPurgeCache 失败: ${t.message}")
         }
-    }
-
-    /** native 原始字节缓存按 defining loader 身份隔离同名类。 */
-    private fun cacheKey(owner: String): String {
-        val loader = taboolib.module.incision.weaver.Scalpel.currentTransformLoader.get()
-        return "${loader?.let { System.identityHashCode(it) } ?: 0}:$owner"
     }
 
     // ----------------------------------------------------------------
@@ -259,7 +167,7 @@ object JvmtiBackend : Backend {
     fun fieldGet(obj: Any, ownerClass: Class<*>, fieldName: String, fieldDesc: String): Any? {
         if (!available()) return null
         return try {
-            nativeInvoke("fieldGet", obj, ownerClass, fieldName, fieldDesc)
+            nFieldGet(obj, ownerClass, fieldName, fieldDesc)
         } catch (t: Throwable) {
             Forensics.warn("nFieldGet 失败: ${ownerClass.name}.$fieldName — ${t.message}")
             null
@@ -269,7 +177,7 @@ object JvmtiBackend : Backend {
     fun fieldSet(obj: Any, ownerClass: Class<*>, fieldName: String, fieldDesc: String, value: Any?) {
         if (!available()) return
         try {
-            nativeInvoke("fieldSet", obj, ownerClass, fieldName, fieldDesc, value)
+            nFieldSet(obj, ownerClass, fieldName, fieldDesc, value)
         } catch (t: Throwable) {
             Forensics.warn("nFieldSet 失败: ${ownerClass.name}.$fieldName — ${t.message}")
         }
@@ -278,7 +186,7 @@ object JvmtiBackend : Backend {
     fun staticFieldGet(ownerClass: Class<*>, fieldName: String, fieldDesc: String): Any? {
         if (!available()) return null
         return try {
-            nativeInvoke("staticFieldGet", ownerClass, fieldName, fieldDesc)
+            nStaticFieldGet(ownerClass, fieldName, fieldDesc)
         } catch (t: Throwable) {
             Forensics.warn("nStaticFieldGet 失败: ${ownerClass.name}.$fieldName — ${t.message}")
             null
@@ -288,7 +196,7 @@ object JvmtiBackend : Backend {
     fun staticFieldSet(ownerClass: Class<*>, fieldName: String, fieldDesc: String, value: Any?) {
         if (!available()) return
         try {
-            nativeInvoke("staticFieldSet", ownerClass, fieldName, fieldDesc, value)
+            nStaticFieldSet(ownerClass, fieldName, fieldDesc, value)
         } catch (t: Throwable) {
             Forensics.warn("nStaticFieldSet 失败: ${ownerClass.name}.$fieldName — ${t.message}")
         }
@@ -297,7 +205,7 @@ object JvmtiBackend : Backend {
     fun invokeMethod(obj: Any?, ownerClass: Class<*>, methodName: String, methodDesc: String, args: Array<Any?>?): Any? {
         if (!available()) return null
         return try {
-            nativeInvoke("invokeMethod", obj, ownerClass, methodName, methodDesc, args)
+            nInvokeMethod(obj, ownerClass, methodName, methodDesc, args)
         } catch (t: Throwable) {
             Forensics.warn("nInvokeMethod 失败: ${ownerClass.name}.$methodName — ${t.message}")
             null
@@ -319,7 +227,6 @@ object JvmtiBackend : Backend {
             System.setProperty("incision.jvmti.class", JvmtiBackend::class.java.name)
             System.load(lib.absolutePath)
             available = nInit(JvmtiBackend::class.java)
-            localNativeOwner = available
             if (available) Forensics.info("JvmtiBackend: JVMTI native loaded from $lib")
             else Forensics.warn("JvmtiBackend: nInit returned false")
             available
@@ -378,13 +285,10 @@ object JvmtiBackend : Backend {
     }
 
     private fun findLoadedClass(className: String): Class<*>? {
-        // Backend API 同时接受 internal name 与 binary name；ClassLoader.findLoadedClass 只接受点号形式。
-        // 不在这里规范化会把已加载插件类误判成 PENDING_LOAD，之后也不会再收到首次加载回调。
-        val binaryName = className.replace('/', '.')
-        val m = findLoadedClassMethod ?: return findClass(binaryName)
+        val m = findLoadedClassMethod ?: return findClass(className)
         for (cl in classLoaders()) {
             try {
-                val cls = m.invoke(cl, binaryName) as? Class<*>
+                val cls = m.invoke(cl, className) as? Class<*>
                 if (cls != null) return cls
             } catch (_: Throwable) {}
         }

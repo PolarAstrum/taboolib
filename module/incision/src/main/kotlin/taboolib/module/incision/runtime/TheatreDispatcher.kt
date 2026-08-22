@@ -1,5 +1,6 @@
 package taboolib.module.incision.runtime
 
+import io.izzel.incision.bridge.IncisionBridge
 import taboolib.module.incision.api.MethodCoordinate
 import taboolib.module.incision.api.Resume
 import taboolib.module.incision.api.Theatre
@@ -19,7 +20,7 @@ import java.util.concurrent.ConcurrentHashMap
 object TheatreDispatcher {
 
     @JvmField
-    val BYPASS_MISS: Any = CanonicalBridge.bypassMiss()
+    val BYPASS_MISS: Any = IncisionBridge.bypassMiss()
 
     private val chains = ConcurrentHashMap<String, AdviceChain>()
     private val wildcardEntries = ConcurrentHashMap<String, MutableList<AdviceEntry>>()
@@ -107,8 +108,6 @@ object TheatreDispatcher {
         chains.computeIfAbsent(target.signature) { AdviceChain(target) }
 
     fun register(entry: AdviceEntry) {
-        // owner 的 defining loader 可能属于 Leaf、AuraSkills 或其他第三方插件；按签名登记声明方才能精确回调。
-        CanonicalBridge.registerTarget(TheatreDispatcher::class.java, entry.target.signature)
         val desc = entry.target.descriptor
         if (desc.contains('*')) {
             val ownerName = "${entry.target.owner}.${entry.target.name}"
@@ -129,38 +128,8 @@ object TheatreDispatcher {
         }
     }
 
-    /**
-     * 为 remap 后的运行时坐标建立同一 advice 链的别名。
-     *
-     * Weaver 写入字节码的是运行时 owner/name/descriptor；dispatcher 若只保存 Mojang/Spigot
-     * 声明坐标，会在旧版 NMS 或成员改名时路由成功却找不到 chain。
-     */
-    internal fun registerRuntimeAlias(runtimeTarget: MethodCoordinate, entries: List<AdviceEntry>) {
-        if (entries.isEmpty()) return
-        CanonicalBridge.registerTarget(TheatreDispatcher::class.java, runtimeTarget.signature)
-        val chain = chainOf(runtimeTarget)
-        entries.forEach(chain::add)
-    }
-
-    fun unregister(target: MethodCoordinate, id: String): Boolean {
-        var removed = false
-        // 一个 entry 可能同时存在于声明坐标和 remap 后运行时坐标；按 id 清理全部投影。
-        for ((signature, chain) in chains) {
-            removed = chain.remove(id) || removed
-            if (chain.isEmpty() && chains.remove(signature, chain)) {
-                CanonicalBridge.unregisterTarget(TheatreDispatcher::class.java.classLoader, signature)
-                bodyInvokerCache.keys.removeIf { it.baseSig == signature }
-            }
-        }
-        val ownerName = "${target.owner}.${target.name}"
-        wildcardEntries[ownerName]?.let { entries ->
-            removed = entries.removeIf { it.id == id } || removed
-            if (entries.isEmpty()) wildcardEntries.remove(ownerName, entries)
-        }
-        predicateWarnedIds.remove(id)
-        bodyInvokerCache.keys.removeIf { it.baseSig == target.signature }
-        return removed
-    }
+    fun unregister(target: MethodCoordinate, id: String): Boolean =
+        chains[target.signature]?.remove(id) ?: false
 
     /**
      * 织入字节码的回调入口。返回值用作目标方法的返回值（若被覆盖）。
@@ -185,10 +154,7 @@ object TheatreDispatcher {
         val adviceId = parsedSig.adviceId
         val phase = parsedSig.phase
         val chain = chains[baseSig]
-        if (chain == null) {
-            if (adviceId != null) Forensics.warn("Site dispatch 未找到宿主 chain: target=$baseSig advice=$adviceId")
-            return originalInvoker?.invoke(args)
-        }
+        if (chain == null) return originalInvoker?.invoke(args)
         val isThrowPhase = phase == "TRAIL_THROW"
         val entries = chain.list().filter { e ->
             if (!e.enabled) return@filter false
@@ -197,10 +163,7 @@ object TheatreDispatcher {
             if (isThrowPhase) return@filter e.kind == AdviceKind.TRAIL && e.onThrow
             matchesPhase(e, phase)
         }
-        if (entries.isEmpty()) {
-            if (adviceId != null) Forensics.warn("Site dispatch 未找到 advice: target=$baseSig advice=$adviceId")
-            return originalInvoker?.invoke(args)
-        }
+        if (entries.isEmpty()) return originalInvoker?.invoke(args)
 
         // SPLICE 相位下若 weaver 未注入 invoker，尝试从 bodies side-car 解析
         val effectiveInvoker: ((Array<Any?>) -> Any?)? = originalInvoker ?: run {
@@ -256,12 +219,7 @@ object TheatreDispatcher {
         else -> true
     }
 
-    fun clear() {
-        chains.clear()
-        wildcardEntries.clear()
-        predicateWarnedIds.clear()
-        bodyInvokerCache.clear()
-    }
+    fun clear() { chains.clear(); wildcardEntries.clear() }
 
     /** 内部 Theatre + Resume 实现 — 链式驱动 */
     private class TheatreImpl(
@@ -298,7 +256,7 @@ object TheatreDispatcher {
 
         /**
          * 执行 advice 上挂载的字符串编译谓词。失败：
-         * - 默认：warnOnce + 视为 false。选择器错误不能扩大 advice 作用域。
+         * - 默认：warnOnce + 视为 true（不阻断）。这样运行期谓词异常不会让 advice 静默失活。
          * - `-Dincision.predicate.strict=true`：抛 [Trauma.Predicate.RuntimeFailure]。
          */
         private fun evalCompiledPredicate(cur: AdviceEntry): Boolean {
@@ -318,7 +276,7 @@ object TheatreDispatcher {
                                 "  source: ${cur.predicateSource ?: "<unknown>"}"
                     )
                 }
-                false
+                true
             }
         }
 

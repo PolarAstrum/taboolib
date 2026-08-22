@@ -5,7 +5,6 @@ import taboolib.module.incision.api.Suture
 import taboolib.module.incision.diagnostic.Forensics
 import taboolib.module.incision.diagnostic.Trauma
 import java.util.concurrent.ConcurrentHashMap
-import java.util.concurrent.CopyOnWriteArrayList
 
 /**
  * 全局切术注册表。
@@ -20,7 +19,7 @@ import java.util.concurrent.CopyOnWriteArrayList
 object SurgeryRegistry {
 
     private val byId = ConcurrentHashMap<String, Suture>()
-    private val byTarget = ConcurrentHashMap<String, CopyOnWriteArrayList<Suture>>()
+    private val byTarget = ConcurrentHashMap<String, MutableList<Suture>>()
 
     fun register(id: String, suture: Suture) {
         val prev = byId.putIfAbsent(id, suture)
@@ -28,7 +27,7 @@ object SurgeryRegistry {
             throw Trauma.Declaration.DuplicateId(id, prev.javaClass.name)
         }
         for (t in suture.targets) {
-            byTarget.computeIfAbsent(t.signature) { CopyOnWriteArrayList() }.add(suture)
+            byTarget.computeIfAbsent(t.signature) { mutableListOf() }.add(suture)
         }
         Forensics.debug("register id=$id targets=${suture.targets}")
     }

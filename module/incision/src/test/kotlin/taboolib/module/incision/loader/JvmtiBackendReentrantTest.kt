@@ -5,7 +5,6 @@ import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.DisplayName
 import org.junit.jupiter.api.Test
 import java.util.concurrent.ConcurrentHashMap
-import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.atomic.AtomicInteger
 
@@ -25,12 +24,10 @@ import java.util.concurrent.atomic.AtomicInteger
 class JvmtiBackendReentrantTest {
 
     @Suppress("UNCHECKED_CAST")
-    private fun getTransformers(): ConcurrentHashMap<String, CopyOnWriteArrayList<(ByteArray) -> ByteArray?>> {
+    private fun getTransformers(): ConcurrentHashMap<String, MutableList<(ByteArray) -> ByteArray?>> {
         val field = JvmtiBackend::class.java.getDeclaredField("transformers")
         field.isAccessible = true
-        // 测试通过反射直接操作生产表，value 类型必须与生产代码完全一致；ArrayList 会在
-        // onClassFileLoad 读取字段时触发 erased generic 之后的 CopyOnWriteArrayList 强转失败。
-        return field.get(JvmtiBackend) as ConcurrentHashMap<String, CopyOnWriteArrayList<(ByteArray) -> ByteArray?>>
+        return field.get(JvmtiBackend) as ConcurrentHashMap<String, MutableList<(ByteArray) -> ByteArray?>>
     }
 
     private fun getReentrantGuard(): ThreadLocal<Boolean> {
@@ -53,7 +50,7 @@ class JvmtiBackendReentrantTest {
     fun normalTransformerInvocation() {
         val callCount = AtomicInteger(0)
         val transformers = getTransformers()
-        transformers.computeIfAbsent("com/example/TestClass") { CopyOnWriteArrayList() }
+        transformers.computeIfAbsent("com/example/TestClass") { mutableListOf() }
             .add { bytes -> callCount.incrementAndGet(); bytes }
 
         val result = JvmtiBackend.onClassFileLoad(null, "com/example/TestClass", byteArrayOf(1, 2, 3))
@@ -79,7 +76,7 @@ class JvmtiBackendReentrantTest {
         val transformers = getTransformers()
 
         // transformer B：处理 InnerClass 时反向触发 OuterClass 加载
-        transformers.computeIfAbsent("com/example/InnerClass") { CopyOnWriteArrayList() }
+        transformers.computeIfAbsent("com/example/InnerClass") { mutableListOf() }
             .add { bytes ->
                 callCountB.incrementAndGet()
                 JvmtiBackend.onClassFileLoad(null, "com/example/OuterClass", byteArrayOf(0xCA.toByte()))
@@ -87,7 +84,7 @@ class JvmtiBackendReentrantTest {
             }
 
         // transformer A：处理 OuterClass 时触发 InnerClass 加载
-        transformers.computeIfAbsent("com/example/OuterClass") { CopyOnWriteArrayList() }
+        transformers.computeIfAbsent("com/example/OuterClass") { mutableListOf() }
             .add { bytes ->
                 callCountA.incrementAndGet()
                 JvmtiBackend.onClassFileLoad(null, "com/example/InnerClass", byteArrayOf(0xFE.toByte()))
@@ -109,7 +106,7 @@ class JvmtiBackendReentrantTest {
         val callCount = AtomicInteger(0)
         val transformers = getTransformers()
 
-        transformers.computeIfAbsent("com/example/SelfRef") { CopyOnWriteArrayList() }
+        transformers.computeIfAbsent("com/example/SelfRef") { mutableListOf() }
             .add { bytes ->
                 val depth = callCount.incrementAndGet()
                 if (depth > 100) {
@@ -138,7 +135,7 @@ class JvmtiBackendReentrantTest {
                 "com/example/B" -> "com/example/C"
                 else -> "com/example/A"
             }
-            transformers.computeIfAbsent(cls) { CopyOnWriteArrayList() }
+            transformers.computeIfAbsent(cls) { mutableListOf() }
                 .add { bytes ->
                     counts[cls]!!.incrementAndGet()
                     JvmtiBackend.onClassFileLoad(null, nextCls, byteArrayOf(0))
@@ -162,7 +159,7 @@ class JvmtiBackendReentrantTest {
         val latch = CountDownLatch(1)
         val transformers = getTransformers()
 
-        transformers.computeIfAbsent("com/example/SharedClass") { CopyOnWriteArrayList() }
+        transformers.computeIfAbsent("com/example/SharedClass") { mutableListOf() }
             .add { bytes -> threadBCount.incrementAndGet(); bytes }
 
         // 线程 A：手动设置重入标记模拟正在 weave
@@ -194,7 +191,7 @@ class JvmtiBackendReentrantTest {
     @DisplayName("transformer 抛异常后重入标记正确清除，后续调用不受影响")
     fun reentrantGuardClearedAfterException() {
         val transformers = getTransformers()
-        transformers.computeIfAbsent("com/example/ErrorClass") { CopyOnWriteArrayList() }
+        transformers.computeIfAbsent("com/example/ErrorClass") { mutableListOf() }
             .add { throw RuntimeException("模拟异常") }
 
         // 第一次：异常

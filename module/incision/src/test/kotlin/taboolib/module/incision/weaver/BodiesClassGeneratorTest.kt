@@ -1,7 +1,6 @@
 package taboolib.module.incision.weaver
 
 import org.junit.jupiter.api.Assertions.assertDoesNotThrow
-import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertNotNull
 import org.junit.jupiter.api.Assertions.assertNull
@@ -29,10 +28,12 @@ import org.objectweb.asm.tree.MethodInsnNode
  *
  * 覆盖两个曾导致 `XXX$$IncisionBodies` 在 defineClass 阶段抛 ClassFormatError 的缺陷：
  *
- * Bug 1（跨插件 native 绑定）：
- *   side-car 曾直接调用各插件副本的 JvmtiBackend.nFieldGet。native image 只能绑定一个
- *   ClassLoader，第二个插件会在 proceed() 时抛 UnsatisfiedLinkError。修复：private 字段访问
- *   统一调用 bootstrap/system ClassLoader 中不重定位的 IncisionBridge 反射入口。
+ * Bug 1（Illegal class name）：
+ *   JvmtiBackend 的内部名曾以 `const val "taboolib/module/incision/loader/JvmtiBackend"`
+ *   硬编码。const 会被内联，TabooLib Shadow relocation 把其中的 `taboolib` 段按「包名(点号)」
+ *   规则替换为重定位前缀，当宿主插件 group 较长（多段点号）时得到点斜混合的非法内部名
+ *   `group.taboolib/module/incision/loader/JvmtiBackend`，被用作 INVOKESTATIC owner 后
+ *   defineClass 抛 `Illegal class name`。修复：改为运行期 `JvmtiBackend::class.java.name.replace('.', '/')`。
  *
  * Bug 2（Illegal method name）：
  *   当被 @Splice 的目标方法是构造函数 `<init>` / 静态初始化 `<clinit>` 时，
@@ -153,11 +154,12 @@ class BodiesClassGeneratorTest {
         }
     }
 
-    // ===== Bug 1：side-car 私有字段访问必须经过 canonical Bridge =====
+    // ===== Bug 1：JvmtiBackend 引用必须为合法全斜杠内部名 =====
 
     @Test
-    @DisplayName("body 中 private GETFIELD 只调用 canonical IncisionBridge")
-    fun privateFieldUsesCanonicalAccessBridge() {
+    @DisplayName("body 中对 JvmtiBackend 的 INVOKESTATIC owner 为合法全斜杠内部名（无点斜混合）")
+    fun jvmtiBackendOwnerIsValidInternalName() {
+        // getValue 含 GETFIELD private 字段 → 会改写为 JvmtiBackend.nFieldGet 调用
         val bytes = generate(
             buildSampleTargetBytes(),
             targetMethods = setOf("getValue" to "()I")
@@ -165,33 +167,36 @@ class BodiesClassGeneratorTest {
         assertNotNull(bytes)
         val node = readNode(bytes!!)
 
-        val accessInvokes = node.methods
+        val jvmtiInvokes = node.methods
             .flatMap { it.instructions.toArray().toList() }
             .filterIsInstance<MethodInsnNode>()
-            .filter { it.name == "accessFieldGet" }
+            .filter { it.owner.endsWith("/JvmtiBackend") || it.owner.endsWith(".JvmtiBackend") }
 
-        assertEquals(1, accessInvokes.size, "getValue 应产生一个字段访问 Bridge 调用")
-        assertEquals("io/izzel/incision/bridge/IncisionBridge", accessInvokes.single().owner)
+        assertTrue(jvmtiInvokes.isNotEmpty(), "getValue 改写后应至少有一处对 JvmtiBackend 的调用")
+
+        jvmtiInvokes.forEach { insn ->
+            val owner = insn.owner
+            // 合法内部名：全斜杠、不含点号、不含点斜混合
+            assertFalse(owner.contains('.'), "JvmtiBackend owner 不应含点号（点斜混合非法名）: $owner")
+            assertTrue(
+                owner.endsWith("incision/loader/JvmtiBackend"),
+                "JvmtiBackend owner 应为全斜杠内部名，实际: $owner"
+            )
+        }
     }
 
     @Test
-    @DisplayName("不加载 JVMTI 时 private 字段 body 可实际执行")
-    fun bodyWithPrivateFieldAccessExecutesWithoutJvmti() {
-        val targetBytes = buildSampleTargetBytes()
-        val bodyBytes = generate(
-            targetBytes,
+    @DisplayName("含 private 字段访问的 body 改写后整体可加载（间接校验 JvmtiBackend 引用合法）")
+    fun bodyWithPrivateFieldAccessIsLoadable() {
+        val bytes = generate(
+            buildSampleTargetBytes(),
             targetMethods = setOf("getValue" to "()I")
         )
-        assertNotNull(bodyBytes)
-        val loader = ByteClassLoader()
-        val targetClass = loader.define(ownerInternal.replace('/', '.'), targetBytes)
-        val bodyClass = loader.define(readNode(bodyBytes!!).name.replace('/', '.'), bodyBytes)
-        val target = targetClass.getConstructor(Int::class.javaPrimitiveType).newInstance(37)
-
-        val result = bodyClass.getMethod("getValue\$body", Any::class.java, Array<Any>::class.java)
-            .invoke(null, target, emptyArray<Any?>())
-
-        assertEquals(37, result)
+        assertNotNull(bytes)
+        val node = readNode(bytes!!)
+        assertDoesNotThrow {
+            ByteClassLoader().define(node.name.replace('/', '.'), bytes)
+        }
     }
 
     // ===== 行为基线：静态方法目标被忽略、空目标返回 null =====

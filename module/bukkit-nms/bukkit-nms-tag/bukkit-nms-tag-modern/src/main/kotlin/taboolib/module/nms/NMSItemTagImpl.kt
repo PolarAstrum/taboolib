@@ -34,11 +34,11 @@ class NMSItemTagImpl : NMSItemTag() {
 
     override fun fromMinecraftJson(json: String): ItemStack? {
         // 1.20.5 -> MojangsonParser.parseTag(String)
-        // 1.21.5 -> MojangsonParser.parseCompoundFully(String)
+        // 1.21.5 -> MojangsonParser.parseComponentFully(String)
         val compound = if (versionId >= 12105) {
             dynamic(
                 DynamicOpcode.INVOKESTATIC,
-                "net.minecraft.nbt.MojangsonParser#parseCompoundFully(java.lang.String;)net.minecraft.nbt.NBTTagCompound;",
+                "net.minecraft.nbt.MojangsonParser#parseComponentFully(java.lang.String;)net.minecraft.nbt.NBTTagCompound;",
                 json
             )
         } else {

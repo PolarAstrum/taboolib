@@ -22,11 +22,8 @@ package taboolib.module.incision.annotation
 @Retention(AnnotationRetention.RUNTIME)
 @MustBeDocumented
 annotation class Trail(
-    /** 兼容的 Scope DSL；非空时优先于 [pointcut]。 */
-    val scope: String = "",
-
-    /** v2 结构化选择器；仅在 [scope] 为空时读取。 */
-    val pointcut: Pointcut = Pointcut(),
+    /** 目标选择器 DSL。 */
+    val scope: String,
 
     /** 是否同时覆盖异常出口；为 `false` 时仅在正常返回时触发。 */
     val onThrow: Boolean = true,
@@ -35,5 +32,5 @@ annotation class Trail(
     val pattern: InsnPattern = InsnPattern([]),
 
     /** 命名标签，可供 DSL、诊断输出或后续匹配事件引用。 */
-    val predicate: String = "",
+    val where: String = "",
 )

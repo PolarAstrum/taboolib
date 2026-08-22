@@ -30,12 +30,8 @@ import taboolib.module.incision.api.Shift
 @MustBeDocumented
 annotation class Site(
     val anchor: Anchor,
-    /** 锚点目标与宿主方法共用同一结构化选择器和 remap 协议。 */
-    val target: Selector = Selector(),
+    val target: String = "",
     val shift: Shift = Shift.BEFORE,
-    /** 默认只选择第一个过滤后命中；选择全部必须显式填写 -1。 */
-    val ordinal: Int = 0,
+    val ordinal: Int = -1,
     val offset: Int = 0,
-    val minMatches: Int = 1,
-    val maxMatches: Int = 1,
 )

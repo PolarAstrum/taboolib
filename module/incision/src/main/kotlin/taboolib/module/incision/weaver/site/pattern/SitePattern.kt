@@ -1,7 +1,6 @@
 package taboolib.module.incision.weaver.site.pattern
 
 import taboolib.module.incision.api.Anchor
-import taboolib.module.incision.annotation.PatternMode
 
 /**
  * Site 模式 —— 描述如何在目标方法字节码中定位匹配点的模型层 sealed class。
@@ -55,7 +54,5 @@ sealed class SitePattern {
      */
     data class OpcodeSeq(
         val steps: List<InsnStep>,
-        /** 默认连续匹配；旧的跨指令搜索只能由声明方显式开启。 */
-        val mode: PatternMode = PatternMode.CONTIGUOUS,
     ) : SitePattern()
 }

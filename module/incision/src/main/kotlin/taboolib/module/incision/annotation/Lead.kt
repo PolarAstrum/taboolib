@@ -24,15 +24,12 @@ package taboolib.module.incision.annotation
 @MustBeDocumented
 annotation class Lead(
 
-    /** 兼容的 Scope DSL；非空时优先于 [pointcut]，两者不会合并。 */
-    val scope: String = "",
-
-    /** v2 结构化选择器；仅在 [scope] 为空时读取。 */
-    val pointcut: Pointcut = Pointcut(),
+    /** 目标选择器 DSL，例如 `method:org.bukkit.entity.Player#kickPlayer(*)`。 */
+    val scope: String,
 
     /** 额外的指令序列约束，用于把入口切入缩小到满足特定字节码形态的目标方法。 */
     val pattern: InsnPattern = InsnPattern([]),
 
     /** 命名标签，可供 DSL、诊断输出或后续匹配事件引用。 */
-    val predicate: String = "",
+    val where: String = "",
 )

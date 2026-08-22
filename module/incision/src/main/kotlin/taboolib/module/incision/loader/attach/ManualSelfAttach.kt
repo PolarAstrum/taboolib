@@ -21,8 +21,7 @@ import java.util.jar.Manifest
  *
  * JDK 9+：
  * - 直接使用内建 `com.sun.tools.attach`（jdk.attach 模块）
- * - 只有 JVM 启动时已启用 `jdk.attach.allowAttachSelf=true` 才允许进程内 attach；
- *   运行时修改该属性不会改变 HotSpot 的启动快照，且会误导其他插件的 attach 策略。
+ * - 若进程未启用 `jdk.attach.allowAttachSelf=true`，尝试动态 set 系统属性后再 attach
  */
 object ManualSelfAttach {
 
@@ -33,6 +32,9 @@ object ManualSelfAttach {
 
     fun attach(): Instrumentation {
         captured?.let { return it }
+
+        // 启用 self-attach（JDK 9+）
+        System.setProperty("jdk.attach.allowAttachSelf", "true")
 
         val vmClass = loadVirtualMachineClass()
         val pid = currentPid().takeIf { it > 0 }
